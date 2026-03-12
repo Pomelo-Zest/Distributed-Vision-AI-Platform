@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vision-ai-platform"
+version = "0.1.0"
+description = "Distributed Vision AI platform MVP"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.34.0",
+  "sqlalchemy>=2.0.38",
+  "psycopg[binary]>=3.2.6",
+  "redis>=5.2.1",
+  "pydantic>=2.10.6",
+  "python-dotenv>=1.0.1",
+  "prometheus-client>=0.21.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["services*", "libs*"]
+

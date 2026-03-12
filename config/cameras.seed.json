@@ -1,0 +1,47 @@
+[
+  {
+    "id": "cam-lobby",
+    "name": "Lobby Entrance",
+    "source_uri": "mock://lobby",
+    "target_fps": 5,
+    "metadata": {
+      "zone": [[0.15, 0.2], [0.85, 0.2], [0.85, 0.8], [0.15, 0.8]],
+      "line": [[0.5, 0.1], [0.5, 0.9]],
+      "loitering_zone": [[0.25, 0.25], [0.75, 0.25], [0.75, 0.75], [0.25, 0.75]]
+    }
+  },
+  {
+    "id": "cam-loading",
+    "name": "Loading Dock",
+    "source_uri": "mock://loading",
+    "target_fps": 4,
+    "metadata": {
+      "zone": [[0.1, 0.15], [0.9, 0.15], [0.9, 0.85], [0.1, 0.85]],
+      "line": [[0.15, 0.5], [0.85, 0.5]],
+      "loitering_zone": [[0.35, 0.35], [0.65, 0.35], [0.65, 0.7], [0.35, 0.7]]
+    }
+  },
+  {
+    "id": "cam-yard",
+    "name": "Perimeter Yard",
+    "source_uri": "mock://yard",
+    "target_fps": 3,
+    "metadata": {
+      "zone": [[0.05, 0.1], [0.95, 0.1], [0.95, 0.9], [0.05, 0.9]],
+      "line": [[0.1, 0.2], [0.9, 0.8]],
+      "loitering_zone": [[0.4, 0.3], [0.7, 0.3], [0.7, 0.6], [0.4, 0.6]]
+    }
+  },
+  {
+    "id": "cam-retail",
+    "name": "Retail Floor",
+    "source_uri": "mock://retail",
+    "target_fps": 6,
+    "metadata": {
+      "zone": [[0.12, 0.12], [0.88, 0.12], [0.88, 0.88], [0.12, 0.88]],
+      "line": [[0.2, 0.6], [0.85, 0.35]],
+      "loitering_zone": [[0.3, 0.2], [0.6, 0.2], [0.6, 0.55], [0.3, 0.55]]
+    }
+  }
+]
+

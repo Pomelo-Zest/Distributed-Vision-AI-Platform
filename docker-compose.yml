@@ -1,0 +1,127 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend-api:
+    build: .
+    env_file: .env
+    command: uvicorn services.backend_api.app.main:app --host 0.0.0.0 --port 8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+
+  scheduler:
+    build: .
+    env_file: .env
+    command: uvicorn services.scheduler.app.main:app --host 0.0.0.0 --port 8040
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8040:8040"
+    volumes:
+      - .:/app
+
+  stream-gateway:
+    build: .
+    env_file: .env
+    command: uvicorn services.stream_gateway.app.main:app --host 0.0.0.0 --port 8010
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8010:8010"
+    volumes:
+      - .:/app
+
+  inference-worker:
+    build: .
+    env_file: .env
+    command: uvicorn services.inference_worker.app.main:app --host 0.0.0.0 --port 8020
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8020:8020"
+    volumes:
+      - .:/app
+
+  event-engine:
+    build: .
+    env_file: .env
+    command: uvicorn services.event_engine.app.main:app --host 0.0.0.0 --port 8030
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8030:8030"
+    volumes:
+      - .:/app
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./deployments/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "${PROMETHEUS_PORT}:9090"
+    depends_on:
+      - backend-api
+      - stream-gateway
+      - inference-worker
+      - event-engine
+      - scheduler
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    ports:
+      - "${GRAFANA_PORT}:3000"
+    volumes:
+      - ./deployments/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+

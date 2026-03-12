@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vision AI Platform</title>
+    <link rel="stylesheet" href="/dashboard/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Distributed Vision AI</p>
+        <h1>Operational demo surface for cameras, events, and latency signals.</h1>
+        <div class="cards">
+          <article class="card">
+            <span>Active cameras</span>
+            <strong id="active-cameras">-</strong>
+          </article>
+          <article class="card">
+            <span>Total detections</span>
+            <strong id="total-detections">-</strong>
+          </article>
+          <article class="card">
+            <span>Total events</span>
+            <strong id="total-events">-</strong>
+          </article>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Cameras</h2>
+            <button id="refresh">Refresh</button>
+          </div>
+          <div id="camera-list" class="camera-list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Recent events</h2>
+          </div>
+          <div id="event-list" class="event-list"></div>
+        </article>
+      </section>
+    </main>
+    <script src="/dashboard/app.js"></script>
+  </body>
+</html>
+
