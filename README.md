@@ -59,12 +59,12 @@ config/
 - zone entry, line crossing, and loitering event generation
 - Postgres-backed camera and event persistence
 - FastAPI endpoints for health, cameras, events, and metrics summary
+- generated SVG camera previews served through the API and dashboard
+- generated SVG event snapshots instead of metadata-only snapshot stubs
 - Prometheus scrape targets and a starter Grafana datasource
 
 ## Next Upgrades
 
 - replace mocked frame generation with OpenCV, FFmpeg, or GStreamer ingest
-- swap `libs/tracking/mock_tracker.py` for YOLO + ByteTrack integration
-- add snapshot image extraction instead of metadata-only event snapshots
-- connect the dashboard to live previews or HLS/WebRTC transport
-
+- swap `libs/tracking/mock_tracker.py` for YOLO26 + ByteTrack integration
+- connect the dashboard to HLS/WebRTC transport instead of generated previews

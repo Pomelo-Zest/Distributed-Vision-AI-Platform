@@ -12,6 +12,7 @@ from libs.common.db import Camera, DetectionLog, SystemMetric, db_session, init_
 from libs.common.logging import configure_logging
 from libs.common.metrics import INFERENCE_LATENCY, QUEUE_DEPTH
 from libs.common.redis_client import get_redis_client
+from libs.common.visualization import write_camera_preview
 from libs.schemas.messages import FrameEnvelope, InferenceEnvelope
 from libs.tracking.mock_tracker import MockTracker
 
@@ -46,6 +47,13 @@ async def consume_frames() -> None:
             camera = session.get(Camera, frame.camera_id)
             if camera is not None:
                 camera.last_inference_at = inference_at
+                write_camera_preview(
+                    camera_id=frame.camera_id,
+                    frame_id=frame.frame_id,
+                    source_uri=frame.source_uri,
+                    detections=[detection.model_dump() for detection in detections],
+                    camera_metadata=camera.metadata_json,
+                )
             for detection in detections:
                 session.add(
                     DetectionLog(
@@ -97,4 +105,3 @@ def health() -> dict[str, str]:
 @app.get("/metrics")
 def metrics() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
-

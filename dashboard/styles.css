@@ -78,6 +78,7 @@ h1 {
 .card span,
 .camera-row p,
 .event-row p,
+.camera-meta,
 time,
 button {
   color: var(--muted);
@@ -91,21 +92,78 @@ button {
 
 .panel-header,
 .camera-row,
-.event-row {
+.event-copy {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-.camera-row,
-.event-row {
-  padding: 14px 0;
-  border-bottom: 1px solid rgba(30, 36, 48, 0.08);
+.camera-list,
+.event-list {
+  display: grid;
+  gap: 16px;
 }
 
-.camera-row:last-child,
-.event-row:last-child {
-  border-bottom: 0;
+.camera-card,
+.event-row {
+  overflow: hidden;
+  border: 1px solid rgba(30, 36, 48, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.camera-row,
+.camera-meta,
+.event-copy,
+.event-row time {
+  padding: 14px 16px;
+}
+
+.camera-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  border-top: 1px solid rgba(30, 36, 48, 0.08);
+}
+
+.camera-preview,
+.event-snapshot {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: linear-gradient(135deg, #10233f, #19324d);
+}
+
+.event-row {
+  display: grid;
+  gap: 0;
+}
+
+.event-snapshot {
+  max-height: 180px;
+}
+
+.event-snapshot.fallback {
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.72);
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+}
+
+.event-copy {
+  border-top: 1px solid rgba(30, 36, 48, 0.08);
+}
+
+.severity {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  text-transform: uppercase;
+  background: rgba(30, 36, 48, 0.08);
+  color: var(--ink);
 }
 
 .status {
@@ -135,9 +193,23 @@ button {
   cursor: pointer;
 }
 
+h3,
+p {
+  margin: 0;
+}
+
+time {
+  display: block;
+}
+
 @media (max-width: 900px) {
   .grid {
     grid-template-columns: 1fr;
   }
-}
 
+  .camera-meta,
+  .event-copy {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

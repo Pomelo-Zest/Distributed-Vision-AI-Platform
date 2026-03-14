@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, Response
@@ -17,6 +15,7 @@ from libs.common.geometry import crossed_line, point_in_polygon
 from libs.common.logging import configure_logging
 from libs.common.metrics import EVENTS_EMITTED, QUEUE_DEPTH
 from libs.common.redis_client import get_redis_client
+from libs.common.visualization import write_event_snapshot
 from libs.schemas.messages import Detection, InferenceEnvelope
 
 logger = configure_logging("event-engine")
@@ -40,34 +39,34 @@ def state_key(camera_id: str, track_id: str) -> str:
     return f"{camera_id}:{track_id}"
 
 
-def write_snapshot(camera_id: str, event_id: str, detection: Detection, payload: dict) -> str:
-    directory = Path(settings.snapshot_dir)
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{camera_id}_{event_id}.json"
-    path.write_text(
-        json.dumps(
-            {
-                "camera_id": camera_id,
-                "detection": detection.model_dump(),
-                "payload": payload,
-            },
-            indent=2,
-        )
-    )
-    return str(path)
-
-
-def emit_event(camera_id: str, rule_type: str, frame_id: int, detection: Detection, payload: dict) -> None:
+def emit_event(
+    camera: Camera,
+    frame: InferenceEnvelope,
+    rule_type: str,
+    detection: Detection,
+    payload: dict,
+) -> None:
     event_id = str(uuid4())
-    snapshot_path = write_snapshot(camera_id, event_id, detection, payload)
+    snapshot_path = write_event_snapshot(
+        camera_id=frame.camera_id,
+        event_id=event_id,
+        frame_id=frame.frame_id,
+        source_uri=frame.metadata.get("source_uri", camera.source_uri),
+        detections=[detection.model_dump()],
+        camera_metadata=camera.metadata_json,
+        event_type=rule_type,
+        event_payload=payload,
+        highlight_track_id=detection.track_id,
+        created_at=frame.inference_at,
+    )
     with db_session() as session:
         session.add(
             EventRecord(
                 id=event_id,
-                camera_id=camera_id,
+                camera_id=frame.camera_id,
                 rule_type=rule_type,
                 track_id=detection.track_id,
-                frame_id=frame_id,
+                frame_id=frame.frame_id,
                 severity="info",
                 snapshot_path=snapshot_path,
                 payload_json=payload,
@@ -78,10 +77,10 @@ def emit_event(camera_id: str, rule_type: str, frame_id: int, detection: Detecti
                 service="event-engine",
                 metric_name="events_total",
                 metric_value=1,
-                labels_json={"camera_id": camera_id, "rule_type": rule_type},
+                labels_json={"camera_id": frame.camera_id, "rule_type": rule_type},
             )
         )
-    EVENTS_EMITTED.labels(rule_type=rule_type, camera_id=camera_id).inc()
+    EVENTS_EMITTED.labels(rule_type=rule_type, camera_id=frame.camera_id).inc()
 
 
 def evaluate_detection(camera: Camera, frame: InferenceEnvelope, detection: Detection) -> None:
@@ -97,9 +96,9 @@ def evaluate_detection(camera: Camera, frame: InferenceEnvelope, detection: Dete
         inside_zone = point_in_polygon(centroid, zone)
         if inside_zone and not ctx.zone_inside:
             emit_event(
-                frame.camera_id,
+                camera,
+                frame,
                 "zone_entry",
-                frame.frame_id,
                 detection,
                 {"centroid": detection.centroid, "zone": zone},
             )
@@ -107,9 +106,9 @@ def evaluate_detection(camera: Camera, frame: InferenceEnvelope, detection: Dete
 
     if line and ctx.last_centroid and crossed_line(ctx.last_centroid, centroid, line):
         emit_event(
-            frame.camera_id,
+            camera,
+            frame,
             "line_crossing",
-            frame.frame_id,
             detection,
             {"from": list(ctx.last_centroid), "to": detection.centroid, "line": line},
         )
@@ -128,9 +127,9 @@ def evaluate_detection(camera: Camera, frame: InferenceEnvelope, detection: Dete
             and (frame.inference_at - ctx.loitering_started_at).total_seconds() >= settings.loitering_seconds
         ):
             emit_event(
-                frame.camera_id,
+                camera,
+                frame,
                 "loitering",
-                frame.frame_id,
                 detection,
                 {"duration_seconds": settings.loitering_seconds, "zone": loitering_zone},
             )
@@ -182,4 +181,3 @@ def health() -> dict[str, str]:
 @app.get("/metrics")
 def metrics() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
-

@@ -11,9 +11,28 @@ from libs.common.config import settings
 from libs.common.db import Camera, EventRecord, DetectionLog, SystemMetric, db_session, init_db
 from libs.common.logging import configure_logging
 from libs.common.redis_client import get_redis_client
+from libs.common.visualization import artifacts_root, preview_path, render_scene_svg
 
 logger = configure_logging("backend-api")
 app = FastAPI(title="Vision AI Backend API", version="0.1.0")
+
+
+def resolve_artifact(path_value: str) -> Path:
+    path = Path(path_value)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path
+
+
+def public_snapshot_url(path_value: str | None) -> str | None:
+    if not path_value:
+        return None
+    path = resolve_artifact(path_value)
+    try:
+        relative_path = path.relative_to(artifacts_root())
+    except ValueError:
+        return None
+    return f"/artifacts/{relative_path.as_posix()}"
 
 
 @app.on_event("startup")
@@ -46,6 +65,7 @@ def list_cameras() -> list[dict]:
                 "last_frame_at": camera.last_frame_at,
                 "last_inference_at": camera.last_inference_at,
                 "metadata": camera.metadata_json,
+                "preview_url": f"/cameras/{camera.id}/preview",
             }
             for camera in cameras
         ]
@@ -73,6 +93,7 @@ def get_camera(camera_id: str) -> dict:
             "last_frame_at": camera.last_frame_at,
             "last_inference_at": camera.last_inference_at,
             "metadata": camera.metadata_json,
+            "preview_url": f"/cameras/{camera.id}/preview",
             "recent_tracks": [
                 {
                     "frame_id": row.frame_id,
@@ -106,6 +127,7 @@ def list_events(limit: int = 50, camera_id: str | None = None, rule_type: str | 
                 "severity": event.severity,
                 "payload": event.payload_json,
                 "snapshot_path": event.snapshot_path,
+                "snapshot_url": public_snapshot_url(event.snapshot_path),
                 "created_at": event.created_at,
             }
             for event in events
@@ -127,8 +149,36 @@ def get_event(event_id: str) -> dict:
             "severity": event.severity,
             "payload": event.payload_json,
             "snapshot_path": event.snapshot_path,
+            "snapshot_url": public_snapshot_url(event.snapshot_path),
             "created_at": event.created_at,
         }
+
+
+@app.get("/cameras/{camera_id}/preview")
+def camera_preview(camera_id: str) -> FileResponse | Response:
+    path = preview_path(camera_id)
+    if not path.exists():
+        return Response(
+            render_scene_svg(
+                camera_id=camera_id,
+                frame_id=0,
+                title=f"Live Preview / {camera_id}",
+                subtitle="Awaiting first inference result",
+                detections=[],
+                camera_metadata={},
+            ),
+            media_type="image/svg+xml",
+        )
+    return FileResponse(path, media_type="image/svg+xml")
+
+
+@app.get("/artifacts/{artifact_path:path}")
+def artifact(artifact_path: str) -> FileResponse:
+    path = artifacts_root() / artifact_path
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    media_type = "image/svg+xml" if path.suffix == ".svg" else None
+    return FileResponse(path, media_type=media_type)
 
 
 @app.get("/metrics/summary")
