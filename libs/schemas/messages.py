@@ -12,6 +12,9 @@ class FrameEnvelope(BaseModel):
     captured_at: datetime
     source_uri: str
     frame_token: str
+    frame_path: str | None = None
+    frame_width: int | None = None
+    frame_height: int | None = None
 
 
 class Detection(BaseModel):
@@ -41,4 +44,3 @@ class EventEnvelope(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     snapshot_path: str | None = None
     created_at: datetime
-

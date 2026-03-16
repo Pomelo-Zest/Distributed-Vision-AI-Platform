@@ -25,8 +25,17 @@ class Settings:
     track_queue_name: str = _env("TRACK_QUEUE_NAME", "vision:tracks")
     camera_seed_path: str = _env("CAMERA_SEED_PATH", "config/cameras.seed.json")
     snapshot_dir: str = _env("SNAPSHOT_DIR", "vision_snapshots")
+    frame_store_dir: str = _env("FRAME_STORE_DIR", "vision_frames")
     loitering_seconds: int = int(_env("LOITERING_SECONDS", "10"))
+    stream_backend: str = _env("STREAM_BACKEND", "ffmpeg")
+    stream_reconnect_seconds: float = float(_env("STREAM_RECONNECT_SECONDS", "2"))
+    yolo_model_path: str = _env("YOLO_MODEL_PATH", "models/yolo26n.pt")
+    yolo_tracker_config: str = _env("YOLO_TRACKER_CONFIG", "bytetrack.yaml")
+    yolo_confidence: float = float(_env("YOLO_CONFIDENCE", "0.25"))
+    yolo_iou: float = float(_env("YOLO_IOU", "0.45"))
+    yolo_image_size: int = int(_env("YOLO_IMAGE_SIZE", "640"))
+    yolo_device: str = _env("YOLO_DEVICE", "")
+    yolo_classes: str = _env("YOLO_CLASSES", "0,1,2,3,5,7")
 
 
 settings = Settings()
-

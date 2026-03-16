@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import FastAPI, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -14,12 +15,12 @@ from libs.common.metrics import INFERENCE_LATENCY, QUEUE_DEPTH
 from libs.common.redis_client import get_redis_client
 from libs.common.visualization import write_camera_preview
 from libs.schemas.messages import FrameEnvelope, InferenceEnvelope
-from libs.tracking.mock_tracker import MockTracker
+from libs.tracking.yolo_bytetrack import YOLOByteTracker
 
 logger = configure_logging("inference-worker")
 app = FastAPI(title="Vision AI Inference Worker", version="0.1.0")
 worker_task: asyncio.Task | None = None
-tracker = MockTracker()
+tracker = YOLOByteTracker()
 
 
 async def consume_frames() -> None:
@@ -33,52 +34,64 @@ async def consume_frames() -> None:
         depth = await redis.llen(settings.frame_queue_name)
         QUEUE_DEPTH.labels(queue_name=settings.frame_queue_name).set(depth)
         frame = FrameEnvelope.model_validate_json(payload)
-        inference_at = datetime.now(timezone.utc)
-        detections = tracker.infer(frame.camera_id, frame.frame_id)
-        result = InferenceEnvelope(
-            camera_id=frame.camera_id,
-            frame_id=frame.frame_id,
-            captured_at=frame.captured_at,
-            inference_at=inference_at,
-            detections=detections,
-            metadata={"frame_token": frame.frame_token, "source_uri": frame.source_uri},
-        )
-        with db_session() as session:
-            camera = session.get(Camera, frame.camera_id)
-            if camera is not None:
-                camera.last_inference_at = inference_at
-                write_camera_preview(
-                    camera_id=frame.camera_id,
-                    frame_id=frame.frame_id,
-                    source_uri=frame.source_uri,
-                    detections=[detection.model_dump() for detection in detections],
-                    camera_metadata=camera.metadata_json,
-                )
-            for detection in detections:
-                session.add(
-                    DetectionLog(
+        try:
+            inference_at = datetime.now(timezone.utc)
+            if not frame.frame_path:
+                raise RuntimeError(f"frame payload missing frame_path for camera {frame.camera_id}")
+            detections = await asyncio.to_thread(tracker.infer, frame.camera_id, frame.frame_path)
+            result = InferenceEnvelope(
+                camera_id=frame.camera_id,
+                frame_id=frame.frame_id,
+                captured_at=frame.captured_at,
+                inference_at=inference_at,
+                detections=detections,
+                metadata={
+                    "frame_token": frame.frame_token,
+                    "source_uri": frame.source_uri,
+                    "frame_path": frame.frame_path,
+                    "frame_width": frame.frame_width,
+                    "frame_height": frame.frame_height,
+                },
+            )
+            with db_session() as session:
+                camera = session.get(Camera, frame.camera_id)
+                if camera is not None:
+                    camera.last_inference_at = inference_at
+                    write_camera_preview(
                         camera_id=frame.camera_id,
                         frame_id=frame.frame_id,
-                        track_id=detection.track_id,
-                        class_name=detection.class_name,
-                        confidence=detection.confidence,
-                        bbox_json=detection.bbox,
-                        centroid_x=detection.centroid[0],
-                        centroid_y=detection.centroid[1],
-                        captured_at=frame.captured_at,
+                        source_uri=frame.source_uri,
+                        detections=[detection.model_dump() for detection in detections],
+                        camera_metadata=camera.metadata_json,
+                    )
+                for detection in detections:
+                    session.add(
+                        DetectionLog(
+                            camera_id=frame.camera_id,
+                            frame_id=frame.frame_id,
+                            track_id=detection.track_id,
+                            class_name=detection.class_name,
+                            confidence=detection.confidence,
+                            bbox_json=detection.bbox,
+                            centroid_x=detection.centroid[0],
+                            centroid_y=detection.centroid[1],
+                            captured_at=frame.captured_at,
+                        )
+                    )
+                session.add(
+                    SystemMetric(
+                        service="inference-worker",
+                        metric_name="detections_per_frame",
+                        metric_value=float(len(detections)),
+                        labels_json={"camera_id": frame.camera_id},
                     )
                 )
-            session.add(
-                SystemMetric(
-                    service="inference-worker",
-                    metric_name="detections_per_frame",
-                    metric_value=float(len(detections)),
-                    labels_json={"camera_id": frame.camera_id},
-                )
-            )
-        INFERENCE_LATENCY.observe((inference_at - frame.captured_at).total_seconds())
-        await redis.rpush(settings.track_queue_name, result.model_dump_json())
-        QUEUE_DEPTH.labels(queue_name=settings.track_queue_name).set(await redis.llen(settings.track_queue_name))
+            INFERENCE_LATENCY.observe((inference_at - frame.captured_at).total_seconds())
+            await redis.rpush(settings.track_queue_name, result.model_dump_json())
+            QUEUE_DEPTH.labels(queue_name=settings.track_queue_name).set(await redis.llen(settings.track_queue_name))
+        finally:
+            if frame.frame_path:
+                Path(frame.frame_path).unlink(missing_ok=True)
 
 
 @app.on_event("startup")
