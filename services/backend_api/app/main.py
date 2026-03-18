@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -9,12 +10,14 @@ from sqlalchemy import desc, func, select
 
 from libs.common.config import settings
 from libs.common.db import Camera, EventRecord, DetectionLog, SystemMetric, db_session, init_db
+from libs.common.hls import HLSStreamManager
 from libs.common.logging import configure_logging
 from libs.common.redis_client import get_redis_client
 from libs.common.visualization import artifacts_root, preview_path, render_scene_svg
 
 logger = configure_logging("backend-api")
 app = FastAPI(title="Vision AI Backend API", version="0.1.0")
+hls_manager = HLSStreamManager()
 
 
 def resolve_artifact(path_value: str) -> Path:
@@ -39,6 +42,11 @@ def public_snapshot_url(path_value: str | None) -> str | None:
 def startup() -> None:
     init_db()
     logger.info("backend ready")
+
+
+@app.on_event("shutdown")
+def shutdown() -> None:
+    hls_manager.stop_all()
 
 
 @app.get("/health")
@@ -66,6 +74,8 @@ def list_cameras() -> list[dict]:
                 "last_inference_at": camera.last_inference_at,
                 "metadata": camera.metadata_json,
                 "preview_url": f"/cameras/{camera.id}/preview",
+                "stream_url": f"/cameras/{camera.id}/hls/index.m3u8",
+                "stream_protocol": "hls",
             }
             for camera in cameras
         ]
@@ -94,6 +104,8 @@ def get_camera(camera_id: str) -> dict:
             "last_inference_at": camera.last_inference_at,
             "metadata": camera.metadata_json,
             "preview_url": f"/cameras/{camera.id}/preview",
+            "stream_url": f"/cameras/{camera.id}/hls/index.m3u8",
+            "stream_protocol": "hls",
             "recent_tracks": [
                 {
                     "frame_id": row.frame_id,
@@ -154,8 +166,8 @@ def get_event(event_id: str) -> dict:
         }
 
 
-@app.get("/cameras/{camera_id}/preview")
-def camera_preview(camera_id: str) -> FileResponse | Response:
+@app.get("/cameras/{camera_id}/preview", response_model=None)
+def camera_preview(camera_id: str) -> Response:
     path = preview_path(camera_id)
     if not path.exists():
         return Response(
@@ -170,6 +182,34 @@ def camera_preview(camera_id: str) -> FileResponse | Response:
             media_type="image/svg+xml",
         )
     return FileResponse(path, media_type="image/svg+xml")
+
+
+@app.get("/cameras/{camera_id}/hls/{asset_name:path}")
+def camera_hls_asset(camera_id: str, asset_name: str) -> FileResponse:
+    with db_session() as session:
+        camera = session.get(Camera, camera_id)
+        if camera is None:
+            raise HTTPException(status_code=404, detail="Camera not found")
+    try:
+        if asset_name == "index.m3u8":
+            path = hls_manager.wait_until_ready(camera)
+        else:
+            path = hls_manager.asset_path(camera_id, asset_name)
+            if not path.exists():
+                hls_manager.ensure_stream(camera)
+                deadline = time.time() + 2
+                while time.time() < deadline and not path.exists():
+                    time.sleep(0.1)
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="HLS asset not found")
+    media_type = None
+    if path.suffix == ".m3u8":
+        media_type = "application/vnd.apple.mpegurl"
+    elif path.suffix == ".ts":
+        media_type = "video/mp2t"
+    return FileResponse(path, media_type=media_type)
 
 
 @app.get("/artifacts/{artifact_path:path}")

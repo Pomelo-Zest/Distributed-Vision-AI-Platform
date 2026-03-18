@@ -11,6 +11,7 @@ vision_snapshots/
 dist/
 node_modules/
 vision_frames/
+vision_hls/
 tmp/
 models/
 *.egg-info/

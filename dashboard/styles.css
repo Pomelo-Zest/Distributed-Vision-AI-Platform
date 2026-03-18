@@ -136,6 +136,18 @@ button {
   background: linear-gradient(135deg, #10233f, #19324d);
 }
 
+video.camera-preview {
+  border: 0;
+}
+
+.camera-preview.fallback,
+.event-snapshot.fallback {
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.72);
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+}
+
 .event-row {
   display: grid;
   gap: 0;
@@ -143,13 +155,6 @@ button {
 
 .event-snapshot {
   max-height: 180px;
-}
-
-.event-snapshot.fallback {
-  display: grid;
-  place-items: center;
-  color: rgba(255, 255, 255, 0.72);
-  font-family: "Space Grotesk", "Segoe UI", sans-serif;
 }
 
 .event-copy {

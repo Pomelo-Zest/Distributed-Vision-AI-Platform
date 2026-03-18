@@ -60,13 +60,13 @@ config/
 - zone entry, line crossing, and loitering event generation
 - Postgres-backed camera and event persistence
 - FastAPI endpoints for health, cameras, events, and metrics summary
-- generated SVG camera previews served through the API and dashboard
+- HLS camera streams served through the API and attached in the dashboard
 - generated SVG event snapshots instead of metadata-only snapshot stubs
 - Prometheus scrape targets and a starter Grafana datasource
 
 ## Next Upgrades
 
-- connect the dashboard to HLS/WebRTC transport instead of generated previews
+- add WebRTC transport for lower-latency live previews alongside HLS
 
 ## Stream Sources
 
@@ -76,3 +76,8 @@ config/
 - The seeded cameras now use the person and vehicle test clips under `assets/human_streams/` and `assets/traffic_streams/`.
 - The default YOLO weight path is `models/yolo26n.pt`.
 - Existing `mock://...` URIs still work as a compatibility path while you migrate seeded cameras to real streams.
+
+## Dashboard Transport
+
+- The dashboard now uses HLS transport from `/cameras/{camera_id}/hls/index.m3u8` instead of generated preview images.
+- Server-side HLS packaging is produced with the bundled `imageio-ffmpeg` binary, so no system `ffmpeg` install is required.
