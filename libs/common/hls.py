@@ -100,6 +100,8 @@ class HLSStreamManager:
         command = [imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-loglevel", "error"]
         if source_uri.startswith("mock://"):
             raise RuntimeError("HLS transport does not support mock:// sources")
+        if camera.source_uri.startswith(("rtsp://", "rtsps://")):
+            command.extend(["-rtsp_transport", "tcp"])
         if "://" not in source_uri:
             command.extend(["-stream_loop", "-1", "-re"])
         command.extend(

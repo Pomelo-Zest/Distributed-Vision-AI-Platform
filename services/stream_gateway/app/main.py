@@ -18,7 +18,7 @@ except ImportError:  # pragma: no cover - depends on installed runtime extras
     np = None
 
 from libs.common.config import settings
-from libs.common.db import Camera, SystemMetric, db_session, init_db
+from libs.common.db import Camera, SystemMetric, db_session, init_db, update_camera_runtime
 from libs.common.logging import configure_logging
 from libs.common.metrics import CAMERA_STATUS, FRAME_EMITTED, QUEUE_DEPTH
 from libs.common.redis_client import get_redis_client
@@ -127,7 +127,32 @@ async def next_frame(camera: Camera, capture: cv2.VideoCapture | None, frame_id:
     return success, frame
 
 
-def mark_camera_state(camera_id: str, status: str, reconnect_increment: bool = False) -> None:
+async def trim_frame_queue(redis) -> int:
+    dropped = 0
+    max_depth = max(settings.frame_queue_max_depth, 1)
+    depth = await redis.llen(settings.frame_queue_name)
+    while depth >= max_depth:
+        payload = await redis.lpop(settings.frame_queue_name)
+        if payload is None:
+            break
+        dropped += 1
+        try:
+            dropped_frame = FrameEnvelope.model_validate_json(payload)
+        except Exception:
+            dropped_frame = None
+        if dropped_frame is not None and dropped_frame.frame_path:
+            Path(dropped_frame.frame_path).unlink(missing_ok=True)
+        depth -= 1
+    return dropped
+
+
+def mark_camera_state(
+    camera_id: str,
+    status: str,
+    reconnect_increment: bool = False,
+    last_error: str | None = None,
+    stream_state: str | None = None,
+) -> None:
     with db_session() as session:
         camera = session.get(Camera, camera_id)
         if camera is None:
@@ -135,6 +160,25 @@ def mark_camera_state(camera_id: str, status: str, reconnect_increment: bool = F
         camera.status = status
         if reconnect_increment:
             camera.reconnect_count += 1
+        runtime_fields: dict[str, object] = {"updated_at": datetime.now(timezone.utc).isoformat()}
+        if last_error is not None:
+            runtime_fields["last_error"] = last_error
+            runtime_fields["last_disconnect_at"] = datetime.now(timezone.utc).isoformat()
+        if stream_state is not None:
+            runtime_fields["stream_state"] = stream_state
+        update_camera_runtime(camera, **runtime_fields)
+
+
+def record_stream_metric(camera_id: str, metric_name: str, metric_value: float, labels: dict[str, object]) -> None:
+    with db_session() as session:
+        session.add(
+            SystemMetric(
+                service="stream-gateway",
+                metric_name=metric_name,
+                metric_value=metric_value,
+                labels_json={"camera_id": camera_id, **labels},
+            )
+        )
 
 
 async def publish_frames(camera_id: str) -> None:
@@ -142,6 +186,7 @@ async def publish_frames(camera_id: str) -> None:
     capture: cv2.VideoCapture | None = None
     frame_id = 0
     last_emit_monotonic = 0.0
+    was_reconnecting = False
     try:
         while True:
             with db_session() as session:
@@ -160,11 +205,35 @@ async def publish_frames(camera_id: str) -> None:
 
             if not camera.source_uri.startswith("mock://"):
                 if capture is None or not capture.isOpened():
-                    capture = await asyncio.to_thread(open_capture, camera)
+                    try:
+                        capture = await asyncio.to_thread(open_capture, camera)
+                    except Exception as error:
+                        message = f"capture open exception: {error}"
+                        logger.exception("capture open exception", extra={"camera_id": camera.id, "source_uri": camera.source_uri})
+                        mark_camera_state(
+                            camera.id,
+                            "reconnecting",
+                            reconnect_increment=True,
+                            last_error=message,
+                            stream_state="reconnecting",
+                        )
+                        record_stream_metric(camera.id, "stream_disconnect", 1, {"reason": "open_exception"})
+                        CAMERA_STATUS.labels(camera_id=camera.id).set(0)
+                        was_reconnecting = True
+                        await asyncio.sleep(settings.stream_reconnect_seconds)
+                        continue
                     if not capture.isOpened():
                         logger.warning("capture open failed", extra={"camera_id": camera.id, "source_uri": camera.source_uri})
-                        mark_camera_state(camera.id, "offline", reconnect_increment=True)
+                        mark_camera_state(
+                            camera.id,
+                            "reconnecting",
+                            reconnect_increment=True,
+                            last_error="capture open failed",
+                            stream_state="reconnecting",
+                        )
+                        record_stream_metric(camera.id, "stream_disconnect", 1, {"reason": "open_failed"})
                         CAMERA_STATUS.labels(camera_id=camera.id).set(0)
+                        was_reconnecting = True
                         await asyncio.sleep(settings.stream_reconnect_seconds)
                         continue
 
@@ -174,11 +243,33 @@ async def publish_frames(camera_id: str) -> None:
                 await asyncio.sleep(next_emit_at - now_monotonic)
 
             frame_id += 1
-            success, frame_image = await next_frame(camera, capture, frame_id)
+            try:
+                success, frame_image = await next_frame(camera, capture, frame_id)
+            except Exception as error:
+                success, frame_image = False, None
+                message = f"frame read exception: {error}"
+                logger.exception("frame read exception", extra={"camera_id": camera.id, "source_uri": camera.source_uri})
+                mark_camera_state(
+                    camera.id,
+                    "reconnecting",
+                    reconnect_increment=True,
+                    last_error=message,
+                    stream_state="reconnecting",
+                )
+                record_stream_metric(camera.id, "stream_disconnect", 1, {"reason": "read_exception"})
+                was_reconnecting = True
             if not success or frame_image is None:
                 logger.warning("frame read failed", extra={"camera_id": camera.id, "source_uri": camera.source_uri})
-                mark_camera_state(camera.id, "offline", reconnect_increment=True)
+                mark_camera_state(
+                    camera.id,
+                    "reconnecting",
+                    reconnect_increment=True,
+                    last_error="frame read failed",
+                    stream_state="reconnecting",
+                )
+                record_stream_metric(camera.id, "stream_disconnect", 1, {"reason": "read_failed"})
                 CAMERA_STATUS.labels(camera_id=camera.id).set(0)
+                was_reconnecting = True
                 if capture is not None:
                     await asyncio.to_thread(capture.release)
                     capture = None
@@ -186,13 +277,38 @@ async def publish_frames(camera_id: str) -> None:
                 continue
 
             captured_at = datetime.now(timezone.utc)
-            frame_path = await asyncio.to_thread(write_frame_file, camera_id, frame_id, frame_image)
+            try:
+                frame_path = await asyncio.to_thread(write_frame_file, camera_id, frame_id, frame_image)
+            except Exception as error:
+                logger.exception("frame persist failed", extra={"camera_id": camera_id})
+                mark_camera_state(
+                    camera_id,
+                    "reconnecting",
+                    reconnect_increment=False,
+                    last_error=f"frame persist failed: {error}",
+                    stream_state="degraded",
+                )
+                record_stream_metric(camera_id, "stream_disconnect", 1, {"reason": "frame_persist_failed"})
+                was_reconnecting = True
+                await asyncio.sleep(settings.stream_reconnect_seconds)
+                continue
             with db_session() as session:
                 camera_row = session.get(Camera, camera_id)
                 if camera_row is None:
                     return
                 camera_row.status = "online"
                 camera_row.last_frame_at = captured_at
+                update_camera_runtime(
+                    camera_row,
+                    last_error=None,
+                    last_recovered_at=captured_at.isoformat(),
+                    stream_state="online",
+                    stream_backend=resolve_backend(camera_row)[0],
+                    source_uri=camera_row.source_uri,
+                )
+            if was_reconnecting:
+                record_stream_metric(camera_id, "stream_recovered", 1, {"source_uri": camera.source_uri})
+                was_reconnecting = False
 
             envelope = FrameEnvelope(
                 camera_id=camera_id,
@@ -204,6 +320,9 @@ async def publish_frames(camera_id: str) -> None:
                 frame_width=int(frame_image.shape[1]),
                 frame_height=int(frame_image.shape[0]),
             )
+            dropped = await trim_frame_queue(redis)
+            if dropped:
+                record_stream_metric(camera_id, "frame_queue_dropped", float(dropped), {"queue": settings.frame_queue_name})
             await redis.rpush(settings.frame_queue_name, envelope.model_dump_json())
             depth = await redis.llen(settings.frame_queue_name)
             QUEUE_DEPTH.labels(queue_name=settings.frame_queue_name).set(depth)
@@ -219,6 +338,7 @@ async def publish_frames(camera_id: str) -> None:
             camera = session.get(Camera, camera_id)
             if camera is not None:
                 camera.status = "offline"
+                update_camera_runtime(camera, stream_state="offline", updated_at=datetime.now(timezone.utc).isoformat())
             session.add(
                 SystemMetric(
                     service="stream-gateway",

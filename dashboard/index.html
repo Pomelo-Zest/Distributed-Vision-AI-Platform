@@ -4,47 +4,164 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Vision AI Platform</title>
-    <link rel="stylesheet" href="/dashboard/styles.css" />
+    <link rel="stylesheet" href="/dashboard/styles.css?v=20260324b" />
   </head>
   <body>
     <main class="shell">
-      <section class="hero">
-        <p class="eyebrow">Distributed Vision AI</p>
-        <h1>Operational demo surface for cameras, events, and latency signals.</h1>
-        <div class="cards">
-          <article class="card">
-            <span>Active cameras</span>
-            <strong id="active-cameras">-</strong>
-          </article>
-          <article class="card">
-            <span>Total detections</span>
-            <strong id="total-detections">-</strong>
-          </article>
-          <article class="card">
-            <span>Total events</span>
-            <strong id="total-events">-</strong>
-          </article>
+      <aside class="sidebar panel">
+        <div class="sidebar-copy">
+          <p class="eyebrow">Distributed Vision AI</p>
+          <h1>Desktop operations surface for live streams, events, and rule geometry.</h1>
+          <p class="lede">Pick a camera card, draw on top of the live player, and save zones or line crossings directly to the backend.</p>
         </div>
-      </section>
 
-      <section class="grid">
-        <article class="panel">
-          <div class="panel-header">
-            <h2>Camera previews</h2>
-            <button id="refresh">Refresh</button>
+        <section class="sidebar-section sidebar-summary">
+          <div class="sidebar-header">
+            <h2>Live summary</h2>
+            <button id="reset-summary" type="button">Reset summary</button>
           </div>
-          <div id="camera-list" class="camera-list"></div>
+          <div class="cards">
+            <article class="card">
+              <span>Active cameras</span>
+              <strong id="active-cameras">-</strong>
+            </article>
+            <article class="card">
+              <span id="total-detections-label">Tracks in latest frames</span>
+              <strong id="total-detections">-</strong>
+            </article>
+            <article class="card">
+              <span>Total events</span>
+              <strong id="total-events">-</strong>
+            </article>
+            <article class="card activation-card">
+              <span>Latest activation</span>
+              <strong id="latest-activation">Waiting</strong>
+            </article>
+          </div>
+          <p id="summary-message" class="camera-form-message" aria-live="polite"></p>
+        </section>
+
+        <section class="sidebar-section sidebar-intake">
+          <div class="sidebar-header">
+            <h2>Camera intake</h2>
+            <button id="refresh" type="button">Refresh</button>
+          </div>
+          <form id="camera-form" class="camera-form">
+            <div class="camera-form-grid">
+              <label>
+                <span>Camera name</span>
+                <input id="camera-name" name="name" type="text" placeholder="Front Entrance" required />
+              </label>
+              <label>
+                <span>Camera ID</span>
+                <input id="camera-id" name="id" type="text" placeholder="cam-front-entrance" />
+              </label>
+              <label class="camera-form-wide">
+                <span>RTSP address</span>
+                <input id="camera-source-uri" name="source_uri" type="text" placeholder="rtsp://user:pass@host:554/stream" required />
+              </label>
+              <label>
+                <span>Target FPS</span>
+                <input id="camera-target-fps" name="target_fps" type="number" min="1" max="30" value="5" />
+              </label>
+            </div>
+            <div class="camera-form-actions">
+              <button id="camera-submit" type="submit">Add camera</button>
+              <p id="camera-form-message" class="camera-form-message" aria-live="polite"></p>
+            </div>
+          </form>
+        </section>
+
+        <section class="sidebar-section sidebar-transport">
+          <div class="sidebar-header">
+            <h2>Transport</h2>
+          </div>
+          <div class="transport-switch" role="group" aria-label="Preview transport mode">
+            <button id="hls-mode" class="transport-button active" type="button">HLS</button>
+            <button id="webrtc-mode" class="transport-button" type="button">WebRTC</button>
+          </div>
+        </section>
+
+        <section class="sidebar-section geometry-panel sidebar-geometry">
+          <div class="sidebar-header">
+            <h2>Geometry editor</h2>
+          </div>
+          <div class="selection-card">
+            <span class="selection-label">Selected camera</span>
+            <strong id="selected-camera-name">Pick a camera</strong>
+            <p id="selected-camera-id">No camera selected</p>
+          </div>
+          <div class="tool-grid" role="group" aria-label="Geometry tools">
+            <button class="tool-button active" data-tool="zone" type="button">Zone polygon</button>
+            <button class="tool-button" data-tool="loitering_zone" type="button">Loiter polygon</button>
+            <button class="tool-button" data-tool="line" type="button">Line crossing</button>
+          </div>
+          <div class="editor-actions">
+            <button id="finish-shape" type="button">Finish shape</button>
+            <button id="undo-point" type="button">Undo point</button>
+            <button id="clear-shape" type="button">Clear active</button>
+            <button id="save-geometry" class="primary-button" type="button">Save geometry</button>
+          </div>
+          <div class="editor-status">
+            <p id="geometry-message" class="camera-form-message" aria-live="polite"></p>
+            <p id="geometry-hint">Enable overlay editing on a camera, then click to place points. Click near the first point or use Finish shape to close a polygon.</p>
+          </div>
+          <pre id="geometry-json" class="geometry-json">{}</pre>
+        </section>
+
+        <section class="sidebar-section detection-panel sidebar-detection">
+          <div class="sidebar-header">
+            <h2>Detection tuning</h2>
+          </div>
+          <div class="selection-card">
+            <span class="selection-label">Selected camera</span>
+            <strong id="detection-camera-name">Pick a camera</strong>
+            <p id="detection-tuning-hint">Choose object types and tighten thresholds to reduce false positives.</p>
+          </div>
+          <div class="tuning-grid">
+            <label class="checkbox-row"><input id="detect-person" type="checkbox" checked /> <span>People</span></label>
+            <label class="checkbox-row"><input id="detect-vehicle" type="checkbox" checked /> <span>Vehicles</span></label>
+          </div>
+          <label class="range-field">
+            <span>Minimum confidence</span>
+            <input id="detection-confidence" type="range" min="0.2" max="0.95" step="0.05" value="0.4" />
+            <strong id="detection-confidence-value">0.40</strong>
+          </label>
+          <label class="range-field">
+            <span>Minimum box area</span>
+            <input id="detection-min-area" type="range" min="0" max="0.05" step="0.0025" value="0.0025" />
+            <strong id="detection-min-area-value">0.0025</strong>
+          </label>
+          <div class="editor-actions">
+            <button id="save-detection-settings" class="primary-button" type="button">Save detection tuning</button>
+          </div>
+          <p id="detection-message" class="camera-form-message" aria-live="polite"></p>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <article class="panel workspace-panel">
+          <div class="workspace-header">
+            <div>
+              <h2>Live players</h2>
+              <p>Desktop-first multi-camera grid with editable overlays.</p>
+            </div>
+          </div>
+          <div id="camera-list" class="camera-grid"></div>
         </article>
 
-        <article class="panel">
-          <div class="panel-header">
-            <h2>Recent events</h2>
+        <article class="panel workspace-panel">
+          <div class="workspace-header">
+            <div>
+              <h2>Recent events</h2>
+              <p>Latest activations and snapshots from the event engine.</p>
+            </div>
           </div>
           <div id="event-list" class="event-list"></div>
         </article>
       </section>
     </main>
     <script src="/dashboard/vendor/hls.min.js"></script>
-    <script src="/dashboard/app.js"></script>
+    <script src="/dashboard/app.js?v=20260324b"></script>
   </body>
 </html>

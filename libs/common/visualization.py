@@ -7,6 +7,16 @@ from typing import Any
 
 from libs.common.config import settings
 
+try:
+    import cv2
+except ImportError:  # pragma: no cover - depends on installed runtime extras
+    cv2 = None
+
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - depends on installed runtime extras
+    np = None
+
 CANVAS_WIDTH = 1280
 CANVAS_HEIGHT = 720
 
@@ -25,10 +35,10 @@ def preview_path(camera_id: str) -> Path:
     return path / f"{camera_id}.svg"
 
 
-def snapshot_path(camera_id: str, event_id: str) -> Path:
+def snapshot_path(camera_id: str, event_id: str, suffix: str = ".svg") -> Path:
     path = artifacts_root() / "events"
     path.mkdir(parents=True, exist_ok=True)
-    return path / f"{camera_id}_{event_id}.svg"
+    return path / f"{camera_id}_{event_id}{suffix}"
 
 
 def write_camera_preview(
@@ -58,6 +68,7 @@ def write_event_snapshot(
     event_id: str,
     frame_id: int,
     source_uri: str,
+    frame_path: str | None,
     detections: list[dict[str, Any]],
     camera_metadata: dict[str, Any] | None,
     event_type: str,
@@ -65,7 +76,25 @@ def write_event_snapshot(
     highlight_track_id: str | None,
     created_at: datetime,
 ) -> str:
-    path = snapshot_path(camera_id, event_id)
+    if frame_path and cv2 is not None:
+        image = cv2.imread(frame_path)
+        if image is not None:
+            path = snapshot_path(camera_id, event_id, ".png")
+            annotated = _annotate_frame(
+                image=image,
+                camera_id=camera_id,
+                frame_id=frame_id,
+                detections=detections,
+                camera_metadata=camera_metadata or {},
+                highlight_track_id=highlight_track_id,
+                event_type=event_type,
+                event_payload=event_payload,
+                subtitle=created_at.isoformat(),
+            )
+            cv2.imwrite(str(path), annotated)
+            return str(path)
+
+    path = snapshot_path(camera_id, event_id, ".svg")
     path.write_text(
         render_scene_svg(
             camera_id=camera_id,
@@ -206,3 +235,97 @@ def _format_payload_value(value: Any) -> str:
     if isinstance(value, list):
         return "[" + ",".join(_format_payload_value(item) for item in value[:4]) + "]"
     return str(value)
+
+
+def _annotate_frame(
+    image: Any,
+    camera_id: str,
+    frame_id: int,
+    detections: list[dict[str, Any]],
+    camera_metadata: dict[str, Any],
+    highlight_track_id: str | None,
+    event_type: str,
+    event_payload: dict[str, Any] | None,
+    subtitle: str,
+) -> Any:
+    frame = image.copy()
+    height, width = frame.shape[:2]
+
+    _draw_polygon(frame, camera_metadata.get("zone", []), width, height, (57, 224, 155))
+    _draw_polygon(frame, camera_metadata.get("loitering_zone", []), width, height, (61, 196, 255), dashed=True)
+    _draw_line(frame, camera_metadata.get("line", []), width, height, (182, 114, 246))
+
+    for detection in detections:
+        _draw_detection(frame, detection, width, height, detection.get("track_id") == highlight_track_id)
+
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (18, 18), (min(width - 18, 620), 116), (15, 23, 42), thickness=-1)
+    cv2.addWeighted(overlay, 0.68, frame, 0.32, 0, frame)
+    cv2.putText(frame, f"{event_type.upper()} / {camera_id}", (34, 54), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+    cv2.putText(frame, f"frame {frame_id}  {subtitle}", (34, 86), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (212, 221, 233), 1)
+
+    if event_payload:
+        class_name = event_payload.get("class_name", "object")
+        category = event_payload.get("category", class_name)
+        confidence = float(event_payload.get("confidence", 0.0))
+        chip = f"{category}/{class_name}  conf {confidence:.2f}"
+        cv2.putText(frame, chip, (34, 108), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (129, 230, 217), 1)
+
+    return frame
+
+
+def _draw_polygon(
+    image: Any,
+    points: list[list[float]] | list[tuple[float, float]],
+    width: int,
+    height: int,
+    color: tuple[int, int, int],
+    dashed: bool = False,
+) -> None:
+    if cv2 is None or len(points) < 3:
+        return
+    polygon = [
+        (int(x * width), int(y * height))
+        for x, y in points
+    ]
+    if dashed:
+        for index, start in enumerate(polygon):
+            end = polygon[(index + 1) % len(polygon)]
+            cv2.line(image, start, end, color, 2, lineType=cv2.LINE_AA)
+    else:
+        if np is None:
+            return
+        cv2.polylines(image, [np.array(polygon, dtype="int32")], True, color, 2, lineType=cv2.LINE_AA)
+
+
+def _draw_line(
+    image: Any,
+    points: list[list[float]] | list[tuple[float, float]],
+    width: int,
+    height: int,
+    color: tuple[int, int, int],
+) -> None:
+    if cv2 is None or len(points) != 2:
+        return
+    start = (int(points[0][0] * width), int(points[0][1] * height))
+    end = (int(points[1][0] * width), int(points[1][1] * height))
+    cv2.line(image, start, end, color, 3, lineType=cv2.LINE_AA)
+
+
+def _draw_detection(image: Any, detection: dict[str, Any], width: int, height: int, highlight: bool) -> None:
+    if cv2 is None:
+        return
+    x1, y1, x2, y2 = detection["bbox"]
+    left = int(x1 * width)
+    top = int(y1 * height)
+    right = int(x2 * width)
+    bottom = int(y2 * height)
+    color = (92, 140, 255) if highlight else (255, 231, 110)
+    cv2.rectangle(image, (left, top), (right, bottom), color, 2, lineType=cv2.LINE_AA)
+    cx = int(detection["centroid"][0] * width)
+    cy = int(detection["centroid"][1] * height)
+    cv2.circle(image, (cx, cy), 4, color, thickness=-1, lineType=cv2.LINE_AA)
+    category = detection.get("category", detection["class_name"])
+    label = f'{category}/{detection["class_name"]} #{detection["track_id"]} {detection["confidence"]:.2f}'
+    label_top = max(18, top - 12)
+    cv2.putText(image, label, (left, label_top), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, lineType=cv2.LINE_AA)

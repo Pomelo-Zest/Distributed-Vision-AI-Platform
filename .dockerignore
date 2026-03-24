@@ -1,0 +1,16 @@
+.git
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+vision_frames/
+vision_hls/
+vision_snapshots/
+models/
+vision_ai_platform.egg-info/

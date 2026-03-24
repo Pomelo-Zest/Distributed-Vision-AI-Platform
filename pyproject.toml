@@ -19,6 +19,7 @@ dependencies = [
   "prometheus-client>=0.21.1",
   "opencv-python-headless>=4.10.0.84",
   "imageio-ffmpeg>=0.6.0",
+  "aiortc>=1.10.0",
   "ultralytics>=8.3.0",
   "lap>=0.5.12",
 ]

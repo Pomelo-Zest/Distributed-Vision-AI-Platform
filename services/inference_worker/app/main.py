@@ -23,6 +23,10 @@ worker_task: asyncio.Task | None = None
 tracker = YOLOByteTracker()
 
 
+def is_stale_frame(frame: FrameEnvelope, now: datetime) -> bool:
+    return (now - frame.captured_at).total_seconds() > settings.inference_max_frame_age_seconds
+
+
 async def consume_frames() -> None:
     redis = get_redis_client()
     while True:
@@ -34,11 +38,28 @@ async def consume_frames() -> None:
         depth = await redis.llen(settings.frame_queue_name)
         QUEUE_DEPTH.labels(queue_name=settings.frame_queue_name).set(depth)
         frame = FrameEnvelope.model_validate_json(payload)
+        frame_enqueued = False
         try:
             inference_at = datetime.now(timezone.utc)
+            if is_stale_frame(frame, inference_at):
+                with db_session() as session:
+                    session.add(
+                        SystemMetric(
+                            service="inference-worker",
+                            metric_name="stale_frame_dropped",
+                            metric_value=1,
+                            labels_json={"camera_id": frame.camera_id},
+                        )
+                    )
+                continue
             if not frame.frame_path:
                 raise RuntimeError(f"frame payload missing frame_path for camera {frame.camera_id}")
-            detections = await asyncio.to_thread(tracker.infer, frame.camera_id, frame.frame_path)
+            camera_metadata = {}
+            with db_session() as session:
+                camera = session.get(Camera, frame.camera_id)
+                if camera is not None:
+                    camera_metadata = dict(camera.metadata_json or {})
+            detections = await asyncio.to_thread(tracker.infer, frame.camera_id, frame.frame_path, camera_metadata)
             result = InferenceEnvelope(
                 camera_id=frame.camera_id,
                 frame_id=frame.frame_id,
@@ -88,9 +109,10 @@ async def consume_frames() -> None:
                 )
             INFERENCE_LATENCY.observe((inference_at - frame.captured_at).total_seconds())
             await redis.rpush(settings.track_queue_name, result.model_dump_json())
+            frame_enqueued = True
             QUEUE_DEPTH.labels(queue_name=settings.track_queue_name).set(await redis.llen(settings.track_queue_name))
         finally:
-            if frame.frame_path:
+            if frame.frame_path and not frame_enqueued:
                 Path(frame.frame_path).unlink(missing_ok=True)
 
 

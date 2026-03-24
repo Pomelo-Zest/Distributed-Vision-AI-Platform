@@ -1,11 +1,15 @@
 :root {
-  --bg: #f3efe6;
-  --panel: rgba(255, 252, 246, 0.9);
+  --bg: #ece5d8;
+  --panel: rgba(255, 252, 246, 0.92);
+  --panel-strong: rgba(255, 255, 255, 0.98);
   --ink: #1e2430;
   --muted: #67707a;
   --accent: #b24c3d;
   --ok: #216869;
-  --shadow: 0 20px 50px rgba(30, 36, 48, 0.12);
+  --line: #f472b6;
+  --zone: #39e09b;
+  --loiter: #ffc43d;
+  --shadow: 0 24px 60px rgba(30, 36, 48, 0.14);
 }
 
 * {
@@ -17,106 +21,413 @@ body {
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   color: var(--ink);
   background:
-    radial-gradient(circle at top left, rgba(178, 76, 61, 0.18), transparent 30%),
-    linear-gradient(135deg, #f9f4ea, #ece4d8);
+    radial-gradient(circle at top left, rgba(178, 76, 61, 0.18), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(33, 104, 105, 0.12), transparent 24%),
+    linear-gradient(135deg, #f6f0e4, #e4dacb);
 }
 
 .shell {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 40px 20px 80px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 14px 14px 18px;
+  display: grid;
+  grid-template-columns: 380px minmax(0, 1fr);
+  gap: 12px;
 }
 
-.hero {
-  margin-bottom: 28px;
+.panel,
+.card {
+  background: var(--panel);
+  border: 1px solid rgba(30, 36, 48, 0.08);
+  border-radius: 22px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
 }
 
-.eyebrow {
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
-  color: var(--accent);
-  font-size: 12px;
+.sidebar {
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  align-self: start;
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
 }
 
-h1,
+.workspace {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.workspace-panel {
+  padding: 16px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sidebar-copy h1,
 h2,
 h3,
 strong {
   font-family: "Space Grotesk", "Segoe UI", sans-serif;
 }
 
-h1 {
-  max-width: 700px;
-  font-size: clamp(2rem, 4vw, 4rem);
-  margin: 0 0 24px;
+.eyebrow {
+  margin: 0 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--accent);
+  font-size: 11px;
 }
 
-.cards,
-.grid {
+.sidebar-copy h1 {
+  margin: 0;
+  font-size: clamp(1.4rem, 2vw, 2.2rem);
+  line-height: 1.08;
+}
+
+.lede {
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.35;
+  font-size: 13px;
+}
+
+.sidebar-section {
   display: grid;
-  gap: 16px;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sidebar-header,
+.workspace-header,
+.camera-row,
+.camera-actions,
+.event-copy,
+.camera-form-actions,
+.editor-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
 }
 
 .cards {
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
-.grid {
-  grid-template-columns: 1.1fr 0.9fr;
-}
-
-.card,
-.panel {
-  background: var(--panel);
-  border: 1px solid rgba(30, 36, 48, 0.08);
-  border-radius: 22px;
-  padding: 22px;
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(16px);
+.card {
+  padding: 12px;
 }
 
 .card span,
 .camera-row p,
-.event-row p,
+.camera-source,
 .camera-meta,
+.camera-runtime,
 time,
-button {
+button,
+.selection-label,
+.camera-form label,
+.workspace-header p,
+.event-row p {
   color: var(--muted);
 }
 
 .card strong {
   display: block;
-  margin-top: 8px;
-  font-size: 2rem;
+  margin-top: 4px;
+  font-size: 1.35rem;
 }
 
-.panel-header,
-.camera-row,
-.event-copy {
+.camera-form {
+  padding: 14px;
+  border: 1px solid rgba(30, 36, 48, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.camera-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.camera-form-wide {
+  grid-column: 1 / -1;
+}
+
+.camera-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.camera-form input {
+  width: 100%;
+  border: 1px solid rgba(30, 36, 48, 0.12);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font: inherit;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.range-field {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.range-field input {
+  width: 100%;
+}
+
+.checkbox-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink);
 }
 
-.camera-list,
+.checkbox-row input {
+  accent-color: var(--ink);
+}
+
+.tuning-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.camera-form-message {
+  min-height: 1.2em;
+  margin: 0;
+  font-size: 12px;
+}
+
+.camera-form-message.success {
+  color: var(--ok);
+}
+
+.camera-form-message.error {
+  color: var(--accent);
+}
+
+.camera-form-message.pending {
+  color: #8a5b00;
+}
+
+button {
+  border: 0;
+  background: rgba(30, 36, 48, 0.06);
+  border-radius: 999px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.1;
+}
+
+.primary-button,
+.transport-button.active,
+.tool-button.active {
+  background: var(--ink);
+  color: #fff;
+}
+
+.camera-delete {
+  background: rgba(178, 76, 61, 0.12);
+  color: var(--accent);
+}
+
+.workspace-header h2,
+.sidebar-header h2 {
+  font-size: 1rem;
+}
+
+.workspace-header p {
+  font-size: 13px;
+}
+
+.detection-panel,
+.geometry-panel {
+  gap: 10px;
+}
+
+.transport-switch,
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tool-grid {
+  grid-template-columns: 1fr;
+}
+
+.selection-card,
+.geometry-panel,
+.detection-panel {
+  border: 1px solid rgba(30, 36, 48, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.54);
+  padding: 14px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.selection-card strong,
+.selection-card p {
+  display: block;
+  margin: 3px 0 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.editor-status {
+  display: grid;
+  gap: 6px;
+}
+
+.editor-status p {
+  margin: 0;
+}
+
+#geometry-hint {
+  line-height: 1.45;
+}
+
+.geometry-json {
+  margin: 0;
+  padding: 10px 12px;
+  min-height: 96px;
+  max-height: 128px;
+  overflow: auto;
+  border-radius: 16px;
+  background: #162033;
+  color: #dfe7f3;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.camera-grid,
 .event-list {
   display: grid;
-  gap: 16px;
+  gap: 14px;
+}
+
+.camera-grid {
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  align-items: start;
 }
 
 .camera-card,
 .event-row {
   overflow: hidden;
+  min-width: 0;
   border: 1px solid rgba(30, 36, 48, 0.08);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.64);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.72);
+  transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.camera-card.selected {
+  border-color: rgba(30, 36, 48, 0.24);
+  box-shadow: 0 18px 40px rgba(30, 36, 48, 0.12);
+  transform: translateY(-2px);
+}
+
+.player-stage {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: linear-gradient(135deg, #10233f, #19324d);
+}
+
+.camera-preview,
+.camera-overlay,
+.event-snapshot {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.camera-preview {
+  object-fit: cover;
+}
+
+.camera-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  cursor: default;
+  pointer-events: none;
+}
+
+.camera-card.editing .camera-overlay {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.stream-badge {
+  position: absolute;
+  left: 14px;
+  top: 14px;
+  z-index: 3;
+  display: none;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(22, 32, 51, 0.88);
+  color: #fff;
+  font-size: 12px;
+}
+
+.stream-badge.visible {
+  display: inline-flex;
+}
+
+.camera-card-body {
+  display: grid;
+  min-width: 0;
 }
 
 .camera-row,
+.camera-actions,
 .camera-meta,
+.camera-runtime,
 .event-copy,
 .event-row time {
   padding: 14px 16px;
+}
+
+.camera-row,
+.camera-actions,
+.camera-meta {
+  flex-wrap: wrap;
+}
+
+.camera-action-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.camera-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .camera-meta {
@@ -127,17 +438,64 @@ button {
   border-top: 1px solid rgba(30, 36, 48, 0.08);
 }
 
-.camera-preview,
-.event-snapshot {
-  display: block;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-  background: linear-gradient(135deg, #10233f, #19324d);
+.camera-runtime {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
 }
 
-video.camera-preview {
-  border: 0;
+.runtime-state,
+.status,
+.severity {
+  display: inline-block;
+  width: fit-content;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.runtime-state.online,
+.status.online {
+  background: rgba(33, 104, 105, 0.12);
+  color: var(--ok);
+}
+
+.runtime-state.reconnecting,
+.runtime-state.degraded,
+.runtime-state.unknown,
+.status.offline,
+.status.idle {
+  background: rgba(178, 76, 61, 0.12);
+  color: var(--accent);
+}
+
+.status.reconnecting {
+  background: rgba(255, 196, 61, 0.18);
+  color: #8a5b00;
+}
+
+.event-row {
+  display: grid;
+}
+
+.event-snapshot-frame {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  min-height: 220px;
+  background:
+    linear-gradient(135deg, rgba(16, 35, 63, 0.96), rgba(25, 50, 77, 0.96)),
+    radial-gradient(circle at top right, rgba(57, 224, 155, 0.12), transparent 32%);
+}
+
+.event-snapshot {
+  width: 100%;
+  height: auto;
+  max-height: 360px;
+  object-fit: contain;
+  object-position: center;
+  background: transparent;
 }
 
 .camera-preview.fallback,
@@ -148,13 +506,9 @@ video.camera-preview {
   font-family: "Space Grotesk", "Segoe UI", sans-serif;
 }
 
-.event-row {
-  display: grid;
-  gap: 0;
-}
-
-.event-snapshot {
-  max-height: 180px;
+.event-snapshot.fallback {
+  width: 100%;
+  min-height: 196px;
 }
 
 .event-copy {
@@ -162,44 +516,14 @@ video.camera-preview {
 }
 
 .severity {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  text-transform: uppercase;
   background: rgba(30, 36, 48, 0.08);
   color: var(--ink);
 }
 
-.status {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  text-transform: uppercase;
-}
-
-.status.online {
-  background: rgba(33, 104, 105, 0.12);
-  color: var(--ok);
-}
-
-.status.offline,
-.status.idle {
-  background: rgba(178, 76, 61, 0.12);
-  color: var(--accent);
-}
-
-button {
-  border: 0;
-  background: rgba(30, 36, 48, 0.06);
-  border-radius: 999px;
-  padding: 10px 14px;
-  cursor: pointer;
-}
-
+h2,
 h3,
-p {
+p,
+pre {
   margin: 0;
 }
 
@@ -207,14 +531,96 @@ time {
   display: block;
 }
 
-@media (max-width: 900px) {
-  .grid {
+@media (max-width: 1240px) {
+  .shell {
+    grid-template-columns: 320px minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 1100px) {
+  .shell {
+    grid-template-columns: 360px minmax(0, 1fr);
+  }
+
+  .sidebar-copy {
+    display: grid;
+    gap: 4px;
+  }
+}
+
+@media (max-height: 900px) {
+  .shell {
+    padding-top: 12px;
+    padding-bottom: 16px;
+  }
+
+  .sidebar {
+    gap: 10px;
+  }
+
+  .sidebar-copy h1 {
+    font-size: clamp(1.2rem, 1.8vw, 1.8rem);
+  }
+
+  .card strong {
+    font-size: 1.2rem;
+  }
+
+  .geometry-json {
+    max-height: 96px;
+  }
+}
+
+@media (max-width: 980px) {
+  .shell {
     grid-template-columns: 1fr;
   }
 
-  .camera-meta,
-  .event-copy {
+  .sidebar {
+    position: static;
+    grid-template-columns: 1fr;
+  }
+
+  .cards,
+  .transport-switch,
+  .camera-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar-header,
+  .workspace-header,
+  .camera-row,
+  .camera-actions,
+  .event-copy,
+  .camera-form-actions,
+  .editor-actions {
     flex-direction: column;
     align-items: flex-start;
   }
+}
+
+/* Keep sidebar tools stacked in one column at every desktop size. */
+.sidebar {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  grid-template-columns: none !important;
+}
+
+.sidebar > .sidebar-copy,
+.sidebar > .sidebar-section {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 0 auto;
+}
+
+.geometry-panel,
+.detection-panel,
+.sidebar-geometry,
+.sidebar-detection {
+  width: 100%;
+  max-width: 100%;
+  justify-self: stretch !important;
 }

@@ -14,12 +14,17 @@ logger = configure_logging("scheduler")
 app = FastAPI(title="Vision AI Scheduler", version="0.1.0")
 
 
+def is_local_video_source(source_uri: str) -> bool:
+    return source_uri.startswith("file://") or "://" not in source_uri
+
+
 def seed_cameras() -> int:
     path = Path(settings.camera_seed_path)
     if not path.exists():
         path = Path.cwd() / settings.camera_seed_path
     payload = json.loads(path.read_text())
     upserts = 0
+    seeded_ids = {entry["id"] for entry in payload}
     with db_session() as session:
         for entry in payload:
             camera = session.get(Camera, entry["id"])
@@ -39,6 +44,9 @@ def seed_cameras() -> int:
                 camera.target_fps = entry["target_fps"]
                 camera.metadata_json = entry["metadata"]
             upserts += 1
+        for camera in session.query(Camera).all():
+            if camera.id not in seeded_ids and is_local_video_source(camera.source_uri):
+                session.delete(camera)
         session.add(
             SystemMetric(
                 service="scheduler",
@@ -70,4 +78,3 @@ def seed() -> dict[str, int]:
 @app.get("/metrics")
 def metrics() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
-

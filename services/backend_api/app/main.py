@@ -6,18 +6,76 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from sqlalchemy import desc, func, select
+from pydantic import BaseModel, Field
+from sqlalchemy import delete, desc, func, select
 
+from libs.common.camera_config import camera_geometry, delete_camera_config, sync_camera_geometry
 from libs.common.config import settings
 from libs.common.db import Camera, EventRecord, DetectionLog, SystemMetric, db_session, init_db
+from libs.common.event_settings import DEFAULT_EVENT_SETTINGS, normalize_event_settings
 from libs.common.hls import HLSStreamManager
 from libs.common.logging import configure_logging
 from libs.common.redis_client import get_redis_client
 from libs.common.visualization import artifacts_root, preview_path, render_scene_svg
+from libs.common.webrtc import WebRTCStreamManager
 
 logger = configure_logging("backend-api")
 app = FastAPI(title="Vision AI Backend API", version="0.1.0")
 hls_manager = HLSStreamManager()
+webrtc_manager = WebRTCStreamManager()
+
+
+DEFAULT_DETECTION_SETTINGS = {
+    "categories": [item.strip() for item in settings.detection_categories.split(",") if item.strip()],
+    "min_confidence": settings.yolo_confidence,
+    "min_box_area": settings.detection_min_box_area,
+}
+
+
+class WebRTCOffer(BaseModel):
+    sdp: str
+    type: str
+
+
+class CameraCreate(BaseModel):
+    id: str
+    name: str
+    source_uri: str
+    target_fps: int = 5
+    metadata: dict = Field(default_factory=dict)
+
+
+class CameraGeometryUpdate(BaseModel):
+    zone: list[list[float]] = Field(default_factory=list)
+    loitering_zone: list[list[float]] = Field(default_factory=list)
+    line: list[list[float]] = Field(default_factory=list)
+
+
+class CameraDetectionSettingsUpdate(BaseModel):
+    categories: list[str] = Field(default_factory=list)
+    min_confidence: float = Field(default=DEFAULT_DETECTION_SETTINGS["min_confidence"], ge=0.05, le=0.99)
+    min_box_area: float = Field(default=DEFAULT_DETECTION_SETTINGS["min_box_area"], ge=0.0, le=1.0)
+
+
+class EventRuleUpdate(BaseModel):
+    enabled: bool = True
+    categories: list[str] = Field(default_factory=list)
+    min_confidence: float = Field(default=DEFAULT_EVENT_SETTINGS["zone_entry"]["min_confidence"], ge=0.05, le=0.99)
+    min_track_frames: int = Field(default=DEFAULT_EVENT_SETTINGS["zone_entry"]["min_track_frames"], ge=1, le=120)
+    cooldown_seconds: float = Field(default=DEFAULT_EVENT_SETTINGS["zone_entry"]["cooldown_seconds"], ge=0.0, le=300.0)
+    min_motion: float | None = Field(default=None, ge=0.0, le=1.0)
+    min_side_distance: float | None = Field(default=None, ge=0.0, le=1.0)
+    stable_side_frames: int | None = Field(default=None, ge=1, le=30)
+    confirm_frames: int | None = Field(default=None, ge=1, le=30)
+    rearm_distance: float | None = Field(default=None, ge=0.0, le=1.0)
+    direction: str | None = None
+    duration_seconds: float | None = Field(default=None, ge=1.0, le=3600.0)
+
+
+class CameraEventSettingsUpdate(BaseModel):
+    zone_entry: EventRuleUpdate = Field(default_factory=EventRuleUpdate)
+    line_crossing: EventRuleUpdate = Field(default_factory=EventRuleUpdate)
+    loitering: EventRuleUpdate = Field(default_factory=EventRuleUpdate)
 
 
 def resolve_artifact(path_value: str) -> Path:
@@ -38,6 +96,39 @@ def public_snapshot_url(path_value: str | None) -> str | None:
     return f"/artifacts/{relative_path.as_posix()}"
 
 
+def camera_runtime(camera: Camera) -> dict:
+    metadata = camera.metadata_json or {}
+    return dict(metadata.get("runtime", {}))
+
+
+def camera_metadata(camera: Camera) -> dict:
+    metadata = dict(camera.metadata_json or {})
+    metadata.update(camera_geometry(camera))
+    metadata["detection_settings"] = camera_detection_settings(camera)
+    metadata["event_settings"] = camera_event_settings(camera)
+    return metadata
+
+
+def camera_detection_settings(camera: Camera) -> dict:
+    metadata = dict(camera.metadata_json or {})
+    raw = dict(metadata.get("detection_settings", {}))
+    categories = [str(item).strip().lower() for item in raw.get("categories", []) if str(item).strip()]
+    if not categories:
+        categories = list(DEFAULT_DETECTION_SETTINGS["categories"])
+    categories = [item for item in categories if item in {"person", "vehicle", "object"}]
+    if not categories:
+        categories = list(DEFAULT_DETECTION_SETTINGS["categories"])
+    return {
+        "categories": categories,
+        "min_confidence": float(raw.get("min_confidence", DEFAULT_DETECTION_SETTINGS["min_confidence"])),
+        "min_box_area": float(raw.get("min_box_area", DEFAULT_DETECTION_SETTINGS["min_box_area"])),
+    }
+
+
+def camera_event_settings(camera: Camera) -> dict:
+    return normalize_event_settings(dict(camera.metadata_json or {}))
+
+
 @app.on_event("startup")
 def startup() -> None:
     init_db()
@@ -45,8 +136,9 @@ def startup() -> None:
 
 
 @app.on_event("shutdown")
-def shutdown() -> None:
+async def shutdown() -> None:
     hls_manager.stop_all()
+    await webrtc_manager.close_all()
 
 
 @app.get("/health")
@@ -67,18 +159,49 @@ def list_cameras() -> list[dict]:
             {
                 "id": camera.id,
                 "name": camera.name,
+                "source_uri": camera.source_uri,
                 "status": camera.status,
                 "target_fps": camera.target_fps,
                 "reconnect_count": camera.reconnect_count,
                 "last_frame_at": camera.last_frame_at,
                 "last_inference_at": camera.last_inference_at,
-                "metadata": camera.metadata_json,
+                "metadata": camera_metadata(camera),
+                "runtime": camera_runtime(camera),
                 "preview_url": f"/cameras/{camera.id}/preview",
                 "stream_url": f"/cameras/{camera.id}/hls/index.m3u8",
                 "stream_protocol": "hls",
+                "webrtc_url": f"/cameras/{camera.id}/webrtc/offer",
             }
             for camera in cameras
         ]
+
+
+@app.post("/cameras", status_code=201)
+def create_camera(payload: CameraCreate) -> dict:
+    if not payload.source_uri.startswith(("rtsp://", "rtsps://", "http://", "https://", "file://")) and "/" not in payload.source_uri:
+        raise HTTPException(status_code=400, detail="source_uri must be an RTSP, HTTP, file URI, or local path")
+    with db_session() as session:
+        existing = session.get(Camera, payload.id)
+        if existing is not None:
+            raise HTTPException(status_code=409, detail="Camera id already exists")
+        camera = Camera(
+            id=payload.id,
+            name=payload.name,
+            source_uri=payload.source_uri,
+            status="idle",
+            target_fps=max(payload.target_fps, 1),
+            metadata_json=payload.metadata or {},
+        )
+        session.add(camera)
+        session.flush()
+        return {
+            "id": camera.id,
+            "name": camera.name,
+            "source_uri": camera.source_uri,
+            "status": camera.status,
+            "target_fps": camera.target_fps,
+            "metadata": camera_metadata(camera),
+        }
 
 
 @app.get("/cameras/{camera_id}")
@@ -102,10 +225,12 @@ def get_camera(camera_id: str) -> dict:
             "reconnect_count": camera.reconnect_count,
             "last_frame_at": camera.last_frame_at,
             "last_inference_at": camera.last_inference_at,
-            "metadata": camera.metadata_json,
+            "metadata": camera_metadata(camera),
+            "runtime": camera_runtime(camera),
             "preview_url": f"/cameras/{camera.id}/preview",
             "stream_url": f"/cameras/{camera.id}/hls/index.m3u8",
             "stream_protocol": "hls",
+            "webrtc_url": f"/cameras/{camera.id}/webrtc/offer",
             "recent_tracks": [
                 {
                     "frame_id": row.frame_id,
@@ -117,6 +242,78 @@ def get_camera(camera_id: str) -> dict:
                 }
                 for row in recent_tracks
             ],
+        }
+
+
+@app.delete("/cameras/{camera_id}", status_code=204, response_model=None)
+async def delete_camera(camera_id: str) -> Response:
+    with db_session() as session:
+        camera = session.get(Camera, camera_id)
+        if camera is None:
+            raise HTTPException(status_code=404, detail="Camera not found")
+        session.delete(camera)
+    delete_camera_config(camera_id)
+    hls_manager.stop_stream(camera_id)
+    await webrtc_manager.close_camera(camera_id)
+    return Response(status_code=204)
+
+
+@app.put("/cameras/{camera_id}/geometry")
+def update_camera_geometry(camera_id: str, payload: CameraGeometryUpdate) -> dict:
+    with db_session() as session:
+        camera = session.get(Camera, camera_id)
+        if camera is None:
+            raise HTTPException(status_code=404, detail="Camera not found")
+    geometry = sync_camera_geometry(camera_id, payload.model_dump())
+    with db_session() as session:
+        camera = session.get(Camera, camera_id)
+        if camera is None:
+            raise HTTPException(status_code=404, detail="Camera not found")
+        return {
+            "id": camera.id,
+            "metadata": camera_metadata(camera),
+            "geometry": geometry,
+        }
+
+
+@app.put("/cameras/{camera_id}/detection_settings")
+def update_camera_detection_settings(camera_id: str, payload: CameraDetectionSettingsUpdate) -> dict:
+    categories = [item.strip().lower() for item in payload.categories if item.strip()]
+    categories = [item for item in categories if item in {"person", "vehicle", "object"}]
+    if not categories:
+        raise HTTPException(status_code=400, detail="Select at least one detection category")
+    with db_session() as session:
+        camera = session.get(Camera, camera_id)
+        if camera is None:
+            raise HTTPException(status_code=404, detail="Camera not found")
+        metadata = dict(camera.metadata_json or {})
+        metadata["detection_settings"] = {
+            "categories": categories,
+            "min_confidence": payload.min_confidence,
+            "min_box_area": payload.min_box_area,
+        }
+        camera.metadata_json = metadata
+        return {
+            "id": camera.id,
+            "metadata": camera_metadata(camera),
+            "detection_settings": camera_detection_settings(camera),
+        }
+
+
+@app.put("/cameras/{camera_id}/event_settings")
+def update_camera_event_settings(camera_id: str, payload: CameraEventSettingsUpdate) -> dict:
+    normalized = normalize_event_settings({"event_settings": payload.model_dump()})
+    with db_session() as session:
+        camera = session.get(Camera, camera_id)
+        if camera is None:
+            raise HTTPException(status_code=404, detail="Camera not found")
+        metadata = dict(camera.metadata_json or {})
+        metadata["event_settings"] = normalized
+        camera.metadata_json = metadata
+        return {
+            "id": camera.id,
+            "metadata": camera_metadata(camera),
+            "event_settings": camera_event_settings(camera),
         }
 
 
@@ -185,7 +382,7 @@ def camera_preview(camera_id: str) -> Response:
 
 
 @app.get("/cameras/{camera_id}/hls/{asset_name:path}")
-def camera_hls_asset(camera_id: str, asset_name: str) -> FileResponse:
+def camera_hls_asset(camera_id: str, asset_name: str) -> Response:
     with db_session() as session:
         camera = session.get(Camera, camera_id)
         if camera is None:
@@ -204,12 +401,26 @@ def camera_hls_asset(camera_id: str, asset_name: str) -> FileResponse:
         raise HTTPException(status_code=503, detail=str(error)) from error
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="HLS asset not found")
-    media_type = None
     if path.suffix == ".m3u8":
-        media_type = "application/vnd.apple.mpegurl"
-    elif path.suffix == ".ts":
-        media_type = "video/mp2t"
-    return FileResponse(path, media_type=media_type)
+        return Response(
+            path.read_text(encoding="utf-8"),
+            media_type="application/vnd.apple.mpegurl",
+            headers={"Cache-Control": "no-store"},
+        )
+    media_type = "video/mp2t" if path.suffix == ".ts" else None
+    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/cameras/{camera_id}/webrtc/offer")
+async def camera_webrtc_offer(camera_id: str, offer: WebRTCOffer) -> dict[str, str]:
+    with db_session() as session:
+        camera = session.get(Camera, camera_id)
+        if camera is None:
+            raise HTTPException(status_code=404, detail="Camera not found")
+    try:
+        return await webrtc_manager.create_answer(camera, offer.sdp, offer.type)
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
 
 @app.get("/artifacts/{artifact_path:path}")
@@ -230,7 +441,25 @@ async def metrics_summary() -> dict:
     with db_session() as session:
         active_cameras = session.scalar(select(func.count()).select_from(Camera).where(Camera.status == "online")) or 0
         total_events = session.scalar(select(func.count()).select_from(EventRecord)) or 0
-        total_detections = session.scalar(select(func.count()).select_from(DetectionLog)) or 0
+        latest_frame_per_camera = (
+            select(
+                DetectionLog.camera_id.label("camera_id"),
+                func.max(DetectionLog.frame_id).label("frame_id"),
+            )
+            .group_by(DetectionLog.camera_id)
+            .subquery()
+        )
+        latest_tracks_query = (
+            select(DetectionLog.camera_id, DetectionLog.track_id)
+            .join(
+                latest_frame_per_camera,
+                (DetectionLog.camera_id == latest_frame_per_camera.c.camera_id)
+                & (DetectionLog.frame_id == latest_frame_per_camera.c.frame_id),
+            )
+            .distinct()
+            .subquery()
+        )
+        total_detections = session.scalar(select(func.count()).select_from(latest_tracks_query)) or 0
         latest_metrics = session.scalars(
             select(SystemMetric).order_by(desc(SystemMetric.created_at)).limit(10)
         ).all()
@@ -250,6 +479,22 @@ async def metrics_summary() -> dict:
             for metric in latest_metrics
         ],
     }
+
+
+@app.post("/metrics/reset_summary")
+async def reset_metrics_summary() -> dict:
+    with db_session() as session:
+        session.execute(delete(EventRecord))
+        session.execute(delete(DetectionLog))
+        session.execute(delete(SystemMetric))
+        cameras = session.scalars(select(Camera)).all()
+        for camera in cameras:
+            metadata = dict(camera.metadata_json or {})
+            runtime = dict(metadata.get("runtime", {}))
+            runtime["last_event"] = None
+            metadata["runtime"] = runtime
+            camera.metadata_json = metadata
+    return await metrics_summary()
 
 
 @app.get("/metrics")

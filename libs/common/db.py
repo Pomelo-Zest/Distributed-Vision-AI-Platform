@@ -82,6 +82,14 @@ class SystemMetric(Base):
     )
 
 
+def update_camera_runtime(camera: Camera, **runtime_fields: object) -> None:
+    metadata = dict(camera.metadata_json or {})
+    runtime = dict(metadata.get("runtime", {}))
+    runtime.update(runtime_fields)
+    metadata["runtime"] = runtime
+    camera.metadata_json = metadata
+
+
 engine = create_engine(settings.database_url, future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
@@ -101,4 +109,3 @@ def db_session() -> Session:
         raise
     finally:
         session.close()
-

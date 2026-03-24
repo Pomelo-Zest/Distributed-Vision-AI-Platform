@@ -19,9 +19,12 @@ class FrameEnvelope(BaseModel):
 
 class Detection(BaseModel):
     class_name: str = "person"
+    category: str = "person"
     confidence: float
     bbox: list[float] = Field(description="[x1, y1, x2, y2] in normalized coordinates")
     centroid: list[float]
+    anchor: list[float]
+    tracked: bool = True
     track_id: str
 
 
