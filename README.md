@@ -101,5 +101,6 @@ config/
 - Server-side HLS packaging is produced with the bundled `imageio-ffmpeg` binary, so no system `ffmpeg` install is required.
 
 ## Demo
-![project_recording (1) (1) (2)](https://github.com/user-attachments/assets/08f7e147-12ff-4f0f-b65a-3c2b7c16892c)
+https://github.com/user-attachments/assets/d9ae7f05-365e-42d4-9f79-9158565e8e2e
+
 
