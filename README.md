@@ -99,3 +99,7 @@ config/
 - WebRTC offers are posted to `/cameras/{camera_id}/webrtc/offer`.
 - HLS playlists remain available at `/cameras/{camera_id}/hls/index.m3u8`.
 - Server-side HLS packaging is produced with the bundled `imageio-ffmpeg` binary, so no system `ffmpeg` install is required.
+
+## Demo
+![project_recording (1) (1) (2)](https://github.com/user-attachments/assets/08f7e147-12ff-4f0f-b65a-3c2b7c16892c)
+
